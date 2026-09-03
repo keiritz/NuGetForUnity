@@ -310,6 +310,33 @@ namespace NugetForUnity.Ui
         }
 
         /// <summary>
+        ///     Audits the packages.config and the installed packages against the packages built into Unity (Unity 6.5+).
+        ///     The audit only reports, it doesn't change the project.
+        /// </summary>
+        [MenuItem("NuGet/Audit Unity Built-in Packages", false, 2)]
+        protected static void AuditUnityBuiltInPackages()
+        {
+            UnityBuiltInPackageOverrides.Reset();
+            InstalledPackagesManager.UpdateInstalledPackages();
+            var report = UnityBuiltInPackageAuditor.Audit();
+            var reportText = report.ToText(true);
+            if (report.State == UnityBuiltInPackageOverridesState.Unavailable || report.HasIncompatibleEntries)
+            {
+                Debug.LogError(reportText);
+            }
+            else if (report.HasRedundantEntries)
+            {
+                Debug.LogWarning(reportText);
+            }
+            else
+            {
+                Debug.Log(reportText);
+            }
+
+            EditorUtility.DisplayDialog("Unity Built-in Package Audit", reportText, "OK");
+        }
+
+        /// <summary>
         ///     Opens the preferences window.
         /// </summary>
         [MenuItem("NuGet/Preferences", false, 9)]
@@ -1147,7 +1174,12 @@ namespace NugetForUnity.Ui
                     }
                 }
 
-                var existsInUnity = installed == null && isAlreadyImportedInEngine;
+                var builtInPackageCheck = UnityBuiltInPackageOverrides.Check(package, null);
+                var isBuiltIntoUnity = builtInPackageCheck.Compatibility == UnityBuiltInPackageCompatibility.Satisfied;
+                var existsInUnity = installed == null && (isAlreadyImportedInEngine || isBuiltIntoUnity);
+                var existsInUnityTooltip = isBuiltIntoUnity ?
+                    $"Provided by Unity: {package.Id} {builtInPackageCheck.BuiltInVersion}" :
+                    "Already imported by Unity";
 
                 PluginRegistry.Instance.DrawButtons(package, installed, existsInUnity);
 
@@ -1197,7 +1229,7 @@ namespace NugetForUnity.Ui
                 {
                     using (new EditorGUI.DisabledScope(existsInUnity))
                     {
-                        if (GUILayout.Button(new GUIContent("Install", null, existsInUnity ? "Already imported by Unity" : null)))
+                        if (GUILayout.Button(new GUIContent("Install", null, existsInUnity ? existsInUnityTooltip : null)))
                         {
                             package.IsManuallyInstalled = true;
                             var result = NugetPackageInstaller.Install(package);

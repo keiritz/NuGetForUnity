@@ -393,3 +393,18 @@ To import one of the System libraries and resolve the error you need to create a
 ```
 
 and place it inside the containing project that requires the library (e.g. the `Assets` folder). It can also be placed in a folder that contains a `.asmdef` to only add the reference to the sub-project. For example NuGetForUnity also uses a `csc.rsp` file see [csc.rsp](src/NuGetForUnity/Editor/csc.rsp).
+
+## Packages built into Unity 6.5 or newer (Base Class Library extensions)
+
+Starting with Unity 6.5 the Editor ships some NuGet packages as part of its Base Class Library, e.g. `System.Text.Json`, `System.Collections.Immutable`, `System.Reflection.Metadata`, `System.Runtime.CompilerServices.Unsafe` and `Microsoft.Bcl.AsyncInterfaces` (see the [Unity 6.5 upgrade guide](https://docs.unity3d.com/6000.5/Documentation/Manual/UpgradeGuideUnity65.html)). Unity always resolves to its built-in version and drops any other version of the same assembly, so a different version can't be installed from NuGet.
+
+NuGetForUnity reads the list of built-in packages and their versions from `{UnityEditorContentsPath}/BCLExtensions/TargetingPacks/netstandard2.1/data/PackageOverrides.txt` and checks every package before it is downloaded. The check is the same for installing, updating and restoring (including the `slimRestore`):
+
+- If Unity provides a version that satisfies the requested version range (a single version like `8.0.0` is treated as minimum version like NuGet does for dependencies), the package is not installed from NuGet. The **Install** button is disabled and shows the built-in version.
+- If Unity provides a version that doesn't satisfy the requested version range (e.g. a package depends on `System.Text.Json >= 10.0.0` but Unity provides `8.0.6`), the installation fails with an error naming the requesting package, the requested version range and the built-in version. Use a version of the requesting package that is compatible with the built-in version. NuGetForUnity picks the lowest version that satisfies a dependency, to pin a specific (transitive) dependency version install it explicitly before installing the package that depends on it.
+- If Unity 6.5 or newer is used but the `PackageOverrides.txt` can't be read, installing fails with an error describing the problem instead of assuming compatibility.
+- Older Unity versions that don't ship the Base Class Library extensions are not affected.
+
+The menu **NuGet -> Audit Unity Built-in Packages** lists packages of the `packages.config` that are redundant (provided by Unity) or incompatible and dependencies of installed packages that Unity doesn't satisfy. The audit only reports, it never removes packages, use the **Uninstall** button to remove redundant packages. The same findings are logged after every restore. The location and format of `PackageOverrides.txt` are Unity internals, so run the audit after updating the Unity Editor.
+
+The [CLI](#option-1-restore-packages-using-the-cli-recommended-for-cicd) runs outside of Unity, so it doesn't know the Unity Editor installation. Set the environment variable `NUGETFORUNITY_UNITY_CONTENTS_PATH` to the Unity Editor contents directory (the directory containing `BCLExtensions`, e.g. `C:\Program Files\Unity\Hub\Editor\6000.5.5f1\Editor\Data` or `/Applications/Unity/Hub/Editor/6000.5.5f1/Unity.app/Contents`) to enable the check in the CLI, otherwise the CLI logs a warning and restores the packages without the check.

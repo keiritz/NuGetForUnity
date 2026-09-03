@@ -49,13 +49,21 @@ namespace NugetForUnity
         /// <param name="refreshAssets">True to refresh the Unity asset database.  False to ignore the changes (temporarily).</param>
         /// <param name="isSlimRestoreInstall">True to skip checking if lib is imported in Unity and skip installing dependencies.</param>
         /// <param name="allowUpdateForExplicitlyInstalled">False to prevent updating of packages that are explicitly installed.</param>
+        /// <param name="requestedBy">The package that depends on the package to install, <c>null</c> if the package is installed directly.</param>
         /// <returns>True if the package was installed successfully, otherwise false.</returns>
         internal static PackageInstallOperationResult Install(
             [NotNull] INugetPackageIdentifier package,
             bool refreshAssets = true,
             bool isSlimRestoreInstall = false,
-            bool allowUpdateForExplicitlyInstalled = true)
+            bool allowUpdateForExplicitlyInstalled = true,
+            [CanBeNull] INugetPackageIdentifier requestedBy = null)
         {
+            // The check against the packages built into Unity is done before we fetch the package so we never download a package Unity provides.
+            if (TryHandleUnityBuiltInPackage(package, requestedBy, out var builtInPackageResult))
+            {
+                return builtInPackageResult;
+            }
+
             if (!isSlimRestoreInstall && UnityPreImportedLibraryResolver.IsAlreadyImportedInEngine(package.Id, false))
             {
                 NugetLogger.LogVerbose("Package {0} is already imported in engine, skipping install.", package);
@@ -71,7 +79,7 @@ namespace NugetForUnity
             }
 
             foundPackage.IsManuallyInstalled = package.IsManuallyInstalled;
-            return Install(foundPackage, refreshAssets, isSlimRestoreInstall, allowUpdateForExplicitlyInstalled);
+            return Install(foundPackage, refreshAssets, isSlimRestoreInstall, allowUpdateForExplicitlyInstalled, requestedBy);
         }
 
         /// <summary>
@@ -81,13 +89,20 @@ namespace NugetForUnity
         /// <param name="refreshAssets">True to refresh the Unity asset database.  False to ignore the changes (temporarily).</param>
         /// <param name="isSlimRestoreInstall">True to skip checking if lib is imported in Unity and skip installing dependencies.</param>
         /// <param name="allowUpdateForExplicitlyInstalled">False to prevent updating of packages that are explicitly installed.</param>
+        /// <param name="requestedBy">The package that depends on the package to install, <c>null</c> if the package is installed directly.</param>
         /// <returns>True if the package was installed successfully, otherwise false.</returns>
         private static PackageInstallOperationResult Install(
             [NotNull] INugetPackage package,
             bool refreshAssets,
             bool isSlimRestoreInstall,
-            bool allowUpdateForExplicitlyInstalled)
+            bool allowUpdateForExplicitlyInstalled,
+            [CanBeNull] INugetPackageIdentifier requestedBy = null)
         {
+            if (TryHandleUnityBuiltInPackage(package, requestedBy, out var builtInPackageResult))
+            {
+                return builtInPackageResult;
+            }
+
             if (!isSlimRestoreInstall && UnityPreImportedLibraryResolver.IsAlreadyImportedInEngine(package.Id, false))
             {
                 NugetLogger.LogVerbose("Package {0} is already imported in engine, skipping install.", package);
@@ -178,7 +193,7 @@ namespace NugetForUnity
                         foreach (var dependency in frameworkGroup.Dependencies)
                         {
                             NugetLogger.LogVerbose("Installing Dependency: {0} {1}", dependency.Id, dependency.Version);
-                            var dependencyResult = Install(dependency, false, false, false);
+                            var dependencyResult = Install(dependency, false, false, false, package);
                             result.Combine(dependencyResult);
                             if (!dependencyResult.Successful)
                             {
@@ -366,6 +381,37 @@ namespace NugetForUnity
                 }
 
                 EditorUtility.ClearProgressBar();
+            }
+        }
+
+        /// <summary>
+        ///     Checks the package against the packages built into Unity (<see cref="UnityBuiltInPackageOverrides" />).
+        ///     The check is done for every install path (install, update, restore and slim restore) so the result is the same everywhere.
+        /// </summary>
+        /// <param name="package">The package to install.</param>
+        /// <param name="requestedBy">The package that depends on the package to install, <c>null</c> if the package is installed directly.</param>
+        /// <param name="result">The result to return if the package must not be installed from NuGet.</param>
+        /// <returns>True if the package must not be installed from NuGet (either because Unity provides it or because it is incompatible with Unity).</returns>
+        private static bool TryHandleUnityBuiltInPackage(
+            [NotNull] INugetPackageIdentifier package,
+            [CanBeNull] INugetPackageIdentifier requestedBy,
+            out PackageInstallOperationResult result)
+        {
+            var checkResult = UnityBuiltInPackageOverrides.Check(package, requestedBy);
+            switch (checkResult.Compatibility)
+            {
+                case UnityBuiltInPackageCompatibility.Satisfied:
+                    NugetLogger.LogVerbose("{0}", checkResult.Message);
+                    result = new PackageInstallOperationResult { Successful = true };
+                    return true;
+                case UnityBuiltInPackageCompatibility.Incompatible:
+                case UnityBuiltInPackageCompatibility.Unverifiable:
+                    Debug.LogError(checkResult.Message);
+                    result = new PackageInstallOperationResult { Successful = false };
+                    return true;
+                default:
+                    result = null;
+                    return false;
             }
         }
 

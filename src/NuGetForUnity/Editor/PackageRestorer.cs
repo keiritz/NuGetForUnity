@@ -52,6 +52,10 @@ namespace NugetForUnity
                 {
                     somethingChanged = true;
                 }
+
+                // Report packages that are redundant or incompatible with the packages built into Unity (Unity 6.5+).
+                // The audit only logs, it never removes packages. It is a no-op on Unity versions without built-in packages.
+                UnityBuiltInPackageAuditor.LogFindings(UnityBuiltInPackageAuditor.Audit());
             }
             catch (Exception e)
             {

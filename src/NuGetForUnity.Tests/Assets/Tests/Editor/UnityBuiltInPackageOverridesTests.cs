@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -36,6 +37,7 @@ System.Threading.Tasks.Extensions|4.5.4
     [TearDown]
     public void Cleanup()
     {
+        LogAssert.ignoreFailingMessages = false;
         UnityBuiltInPackageOverrides.Reset();
         NugetPackageUninstaller.UninstallAll(InstalledPackagesManager.InstalledPackages.ToList());
         foreach (var configuredPackage in InstalledPackagesManager.PackagesConfigFile.Packages.ToList())
@@ -71,20 +73,22 @@ System.Threading.Tasks.Extensions|4.5.4
     }
 
     [Test]
-    [TestCase("Microsoft.Bcl.AsyncInterfaces", "8.0.0", UnityBuiltInPackageCompatibility.Satisfied)]
-    [TestCase("Microsoft.Bcl.AsyncInterfaces", "6.0.0", UnityBuiltInPackageCompatibility.Satisfied)]
-    [TestCase("Microsoft.Bcl.AsyncInterfaces", "[6.0.0,9.0.0)", UnityBuiltInPackageCompatibility.Satisfied)]
-    [TestCase("Microsoft.Bcl.AsyncInterfaces", "10.0.0", UnityBuiltInPackageCompatibility.Incompatible)]
-    [TestCase("Microsoft.Bcl.AsyncInterfaces", "[8.0.1,)", UnityBuiltInPackageCompatibility.Incompatible)]
-    [TestCase("System.Text.Json", "10.0.9", UnityBuiltInPackageCompatibility.Incompatible)]
-    [TestCase("System.Text.Json", "8.0.6", UnityBuiltInPackageCompatibility.Satisfied)]
-    [TestCase("System.Text.Json", "8.0.0", UnityBuiltInPackageCompatibility.Satisfied)]
-    [TestCase("System.Text.Json", "[8.0.0]", UnityBuiltInPackageCompatibility.Incompatible)]
-    [TestCase("system.text.json", "8.0.6", UnityBuiltInPackageCompatibility.Satisfied)]
-    [TestCase("System.Runtime.CompilerServices.Unsafe", "6.0.0", UnityBuiltInPackageCompatibility.Satisfied)]
-    [TestCase("Newtonsoft.Json", "13.0.1", UnityBuiltInPackageCompatibility.NotBuiltIn)]
-    public void CheckComparesRequestedRangeWithBuiltInVersion(string packageId, string version, UnityBuiltInPackageCompatibility expected)
+    [TestCase("Microsoft.Bcl.AsyncInterfaces", "8.0.0", "Satisfied")]
+    [TestCase("Microsoft.Bcl.AsyncInterfaces", "6.0.0", "Satisfied")]
+    [TestCase("Microsoft.Bcl.AsyncInterfaces", "[6.0.0,9.0.0)", "Satisfied")]
+    [TestCase("Microsoft.Bcl.AsyncInterfaces", "10.0.0", "Incompatible")]
+    [TestCase("Microsoft.Bcl.AsyncInterfaces", "[8.0.1,)", "Incompatible")]
+    [TestCase("System.Text.Json", "10.0.9", "Incompatible")]
+    [TestCase("System.Text.Json", "8.0.6", "Satisfied")]
+    [TestCase("System.Text.Json", "8.0.0", "Satisfied")]
+    [TestCase("System.Text.Json", "[8.0.0]", "Incompatible")]
+    [TestCase("system.text.json", "8.0.6", "Satisfied")]
+    [TestCase("System.Runtime.CompilerServices.Unsafe", "6.0.0", "Satisfied")]
+    [TestCase("Newtonsoft.Json", "13.0.1", "NotBuiltIn")]
+    public void CheckComparesRequestedRangeWithBuiltInVersion(string packageId, string version, string expectedCompatibility)
     {
+        // the enum is internal so it can't be used as parameter of a public test method
+        var expected = (UnityBuiltInPackageCompatibility)Enum.Parse(typeof(UnityBuiltInPackageCompatibility), expectedCompatibility);
         UnityBuiltInPackageOverrides.OverrideForTesting(UnityBuiltInPackageOverridesState.Available, Unity6000505Overrides);
 
         var result = UnityBuiltInPackageOverrides.Check(new NugetPackageIdentifier(packageId, version), null);
@@ -117,10 +121,11 @@ System.Threading.Tasks.Extensions|4.5.4
     }
 
     [Test]
-    [TestCase(UnityBuiltInPackageOverridesState.NotApplicable)]
-    [TestCase(UnityBuiltInPackageOverridesState.Unknown)]
-    public void CheckKeepsLegacyBehaviorWhenUnityHasNoBuiltInPackages(UnityBuiltInPackageOverridesState state)
+    [TestCase("NotApplicable")]
+    [TestCase("Unknown")]
+    public void CheckKeepsLegacyBehaviorWhenUnityHasNoBuiltInPackages(string stateName)
     {
+        var state = (UnityBuiltInPackageOverridesState)Enum.Parse(typeof(UnityBuiltInPackageOverridesState), stateName);
         UnityBuiltInPackageOverrides.OverrideForTesting(state);
 
         var result = UnityBuiltInPackageOverrides.Check(new NugetPackageIdentifier("System.Text.Json", "10.0.9"), null);
@@ -245,9 +250,12 @@ System.Threading.Tasks.Extensions|4.5.4
         InstalledPackagesManager.PackagesConfigFile.AddPackage(package);
         InstalledPackagesManager.PackagesConfigFile.Save();
 
-        // one error from the rejected install and one from the audit of the packages.config
+        // one error from the rejected install and one from the audit of the packages.config.
+        // The AssetDatabase.Refresh() at the end of the restore triggers a second restore through the NugetAssetPostprocessor
+        // (the packages.config changed) which logs the same errors again, so additional errors are ignored.
         LogAssert.Expect(LogType.Error, new Regex("System\\.Text\\.Json.*8\\.0\\.6.*10\\.0\\.9"));
         LogAssert.Expect(LogType.Error, new Regex("Incompatible packages inside packages.config"));
+        LogAssert.ignoreFailingMessages = true;
         PackageRestorer.Restore(true);
 
         Assert.That(InstalledPackagesManager.IsInstalled(package, false), Is.False);
